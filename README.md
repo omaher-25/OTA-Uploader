@@ -9,11 +9,11 @@ This is an Over-The-Air (OTA) update application built with Python.
 
 # OTA APP
 
-A lightweight Python application for delivering and testing Over-The-Air (OTA) updates.
+A lightweight Python application for delivering and testing Over-The-Air (OTA) updates, with ESP32 firmware support.
 
 ## Overview
 
-This repository contains the application source, a virtual environment folder, and helper scripts to run the app either interactively or silently on Windows.
+This repository contains the Python application source, a virtual environment folder, helper scripts to run the app, and ESP32 firmware for OTA updates.
 
 ## Prerequisites
 
@@ -59,6 +59,8 @@ Notes:
 - `run.bat` — batch script to activate the virtual environment and run the app with `pythonw`
 - `run.vbs` — VBScript wrapper to run `run.bat` invisibly
 - `envota/` — virtual environment folder (optional; typically not committed)
+- `esp32/src/main.cpp` — ESP32 firmware source code
+- `esp32/platformio.ini` — PlatformIO configuration for ESP32
 
 ## Troubleshooting
 
@@ -70,7 +72,44 @@ Notes:
 
 Make changes in a feature branch and submit a pull request. Keep the repository free of personal or sensitive information.
 
-## License
+## ESP32 Firmware
 
-This project is licensed under the MIT License. See the `LICENSE` file for the full license text and copyright notice.
+This folder contains the ESP32 firmware for handling OTA updates.
+
+### Prerequisites
+
+- Arduino IDE with ESP32 board support installed (via Board Manager: `esp32` by Espressif), or
+- PlatformIO (VS Code extension or CLI) for better project management.
+- ESP32 development board (e.g., ESP32-WROOM-32).
+
+### Libraries
+
+The code uses built-in ESP32 libraries:
+- `WiFi.h`
+- `WebServer.h`
+- `Update.h`
+
+No additional libraries need to be installed.
+
+### Setup and Upload
+
+#### Option 1: Arduino IDE
+1. Open `esp32/src/main.cpp` in Arduino IDE.
+2. Replace `YOUR_WIFI` and `YOUR_PASSWORD` with your WiFi credentials.
+3. Select your ESP32 board and port in Tools menu.
+4. Upload the sketch to the ESP32.
+
+#### Option 2: PlatformIO (Recommended)
+1. Install PlatformIO (via VS Code extension or CLI).
+2. Open the `esp32/` folder in VS Code with PlatformIO.
+3. Replace `YOUR_WIFI` and `YOUR_PASSWORD` in `esp32/src/main.cpp`.
+4. Build and upload: Use PlatformIO's build/upload buttons or run `pio run -t upload` in the `esp32/` directory.
+
+### Usage
+
+- The ESP32 will connect to WiFi and start a web server on port 80.
+- Send a POST request to `/update` with the firmware binary to perform OTA update.
+- Use the Python app to send updates to the ESP32's IP address.
+
+## License
 
