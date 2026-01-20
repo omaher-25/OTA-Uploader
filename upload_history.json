@@ -1,0 +1,10 @@
+[
+  {
+    "timestamp": "2026-01-20T18:02:18.895432",
+    "ip": "192.168.4.1",
+    "status": "failed",
+    "file": "pickup.ino",
+    "checksum": null,
+    "error": "Device at 192.168.4.1 is offline or unreachable. Please check the IP address and network connection."
+  }
+]

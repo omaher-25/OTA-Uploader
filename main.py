@@ -155,9 +155,13 @@ def scan_network_for_devices():
         pass
     return devices
 
-def update_status(text, color):
-    """Update status label."""
+def update_status(text, color, progress_text=""):
+    """Update status label with optional progress text."""
     status_label.config(text=text, fg=color)
+    if progress_text:
+        progress_label.config(text=progress_text, fg=COLORS['text_dim'])
+    else:
+        progress_label.config(text="")
     root.update()
 
 # ============= UPLOAD & CORE FUNCTIONS =============
@@ -185,34 +189,89 @@ def upload_firmware():
     thread.start()
 
 def _upload_firmware_thread(ip, file_path):
-    """Thread function for uploading firmware."""
+    """Thread function for uploading firmware with enhanced error handling."""
     url = f"http://{ip}/update"
     file_name = os.path.basename(file_path)
     checksum = None
+    start_time = datetime.now()
     
     try:
-        if app_config.get('verify_checksum', True):
-            update_status("📊 Calculating checksum...", COLORS['text'])
-            checksum = calculate_checksum(file_path)
+        # Get file size
+        file_size = os.path.getsize(file_path)
+        file_size_mb = file_size / (1024 * 1024)
+        update_status(f"📦 Preparing upload: {file_name} ({file_size_mb:.2f} MB)", COLORS['text'])
         
+        # Calculate checksum if enabled
+        if app_config.get('verify_checksum', True):
+            update_status("📊 Calculating checksum...", COLORS['text'], "This may take a moment...")
+            checksum = calculate_checksum(file_path)
+            update_status(f"📊 Checksum: {checksum[:16]}...", COLORS['text'])
+        
+        # Check device connectivity
+        update_status(f"🔍 Connecting to {ip}...", COLORS['text'], "Verifying device is online...")
         if not check_device_online(ip):
-            raise Exception("Device is offline")
-
+            raise ConnectionError(f"Device at {ip} is offline or unreachable. Please check the IP address and network connection.")
+        
+        update_status(f"📤 Uploading to {ip}...", COLORS['text'], f"Uploading {file_size_mb:.2f} MB...")
+        
+        # Upload firmware with error handling
         with open(file_path, "rb") as f:
             files = {"file": f}
-            r = requests.post(url, files=files, timeout=120)
+            try:
+                r = requests.post(url, files=files, timeout=120)
+            except requests.exceptions.Timeout:
+                raise TimeoutError(f"Upload timed out after 120 seconds. The firmware file may be too large or the connection is slow.")
+            except requests.exceptions.ConnectionError:
+                raise ConnectionError(f"Connection lost during upload. Device may have reset or network connection was interrupted.")
+            except requests.exceptions.RequestException as e:
+                raise Exception(f"Network error: {str(e)}")
 
+        # Calculate upload time and speed
+        elapsed_time = (datetime.now() - start_time).total_seconds()
+        upload_speed = file_size_mb / elapsed_time if elapsed_time > 0 else 0
+        
+        # Check response status
         if r.status_code == 200:
-            update_status("✅ Firmware uploaded! ESP32 rebooting...", COLORS['success'])
+            update_status(
+                f"✅ Upload successful! ESP32 rebooting...", 
+                COLORS['success'],
+                f"Uploaded {file_size_mb:.2f} MB in {elapsed_time:.1f}s ({upload_speed:.2f} MB/s)"
+            )
             log_upload(ip, "success", file_name, checksum=checksum)
+        elif r.status_code == 400:
+            error_msg = "Invalid firmware file or corrupted upload"
+            update_status(f"❌ Upload failed: {error_msg}", COLORS['highlight'], f"HTTP {r.status_code}")
+            log_upload(ip, "failed", file_name, error=error_msg)
+        elif r.status_code == 413:
+            error_msg = "Firmware file too large for device"
+            update_status(f"❌ Upload failed: {error_msg}", COLORS['highlight'], f"HTTP {r.status_code}")
+            log_upload(ip, "failed", file_name, error=error_msg)
+        elif r.status_code == 500:
+            error_msg = "Device internal error during upload"
+            update_status(f"❌ Upload failed: {error_msg}", COLORS['highlight'], f"HTTP {r.status_code}")
+            log_upload(ip, "failed", file_name, error=error_msg)
         else:
-            error_msg = f"Status: {r.status_code}"
-            update_status(f"❌ Upload failed. {error_msg}", COLORS['highlight'])
+            error_msg = f"Unexpected response (HTTP {r.status_code})"
+            update_status(f"❌ Upload failed: {error_msg}", COLORS['highlight'], f"Response: {r.text[:50] if r.text else 'No details'}")
             log_upload(ip, "failed", file_name, error=error_msg)
 
+    except FileNotFoundError as e:
+        error_msg = f"Firmware file not found: {file_name}"
+        update_status(f"❌ Error: {error_msg}", COLORS['highlight'], "Please select a valid firmware file.")
+        log_upload(ip, "failed", file_name, error=error_msg)
+    except ConnectionError as e:
+        update_status(f"❌ Connection Error", COLORS['highlight'], str(e))
+        log_upload(ip, "failed", file_name, error=str(e))
+    except TimeoutError as e:
+        update_status(f"❌ Timeout Error", COLORS['highlight'], str(e))
+        log_upload(ip, "failed", file_name, error=str(e))
+    except PermissionError as e:
+        error_msg = f"Permission denied: Cannot read {file_name}"
+        update_status(f"❌ Error: {error_msg}", COLORS['highlight'], "Check file permissions.")
+        log_upload(ip, "failed", file_name, error=error_msg)
     except Exception as e:
-        error_msg = str(e)[:50]
-        update_status(f"❌ Error: {error_msg}", COLORS['highlight'])
+        error_msg = str(e)
+        update_status(f"❌ Unexpected Error", COLORS['highlight'], error_msg[:100])
         log_upload(ip, "failed", file_name, error=error_msg)
 
     finally:
@@ -451,7 +510,7 @@ def import_config_window():
                 app_config.update(config_data['settings'])
                 save_config(app_config)
             
-            refresh_ip_listbox()
+            refresh_ip_tree()
             messagebox.showinfo("Success", "Configuration imported successfully!")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to import: {str(e)}")
@@ -483,7 +542,6 @@ except Exception:
 style.configure('Card.TFrame', background=COLORS['card'])
 style.configure('Accent.TButton', background=COLORS['accent'], foreground=COLORS['text'], borderwidth=0, focusthickness=0)
 style.map('Accent.TButton', background=[('active', COLORS['button_hover'])])
-style.configure('Primary.TButton', background=COLORS['highlight'], foreground='white')
 style.configure('TLabel', background=COLORS['bg'], foreground=COLORS['text'])
 
 # Layout: Sidebar (left), Main (center), Details (right)
@@ -567,8 +625,10 @@ scan_btn.pack(side=tk.LEFT)
 check_btn = ttk.Button(action_row, text='ℹ️ Check Version', command=check_device_version)
 check_btn.pack(side=tk.LEFT, padx=(SPACING, 0))
 
-upload_btn = ttk.Button(card, text='🚀 Upload Firmware', style='Primary.TButton', command=upload_firmware)
+upload_btn = tk.Button(card, text='🚀 Upload Firmware', bg=COLORS['highlight'], fg='white', font=('Segoe UI', 10, 'bold'), command=upload_firmware)
 upload_btn.pack(anchor='center', pady=(INNER_PADDING, SPACING))
+upload_btn.bind('<Enter>', on_enter)
+upload_btn.bind('<Leave>', lambda e: on_leave(e, COLORS['highlight']))
 
 progress_bar = ttk.Progressbar(card, mode='indeterminate')
 progress_bar.pack(fill=tk.X, pady=(SPACING, 0))
@@ -582,11 +642,17 @@ details_text.pack(fill=tk.BOTH, expand=True, padx=INNER_PADDING, pady=(0, INNER_
 details_text.insert(tk.END, 'Select a device or enter an IP and click "Check Version".')
 details_text.config(state=tk.DISABLED)
 
-# Status bar at bottom
+# Status bar at bottom with enhanced information
 status_frame = tk.Frame(root, bg=COLORS['bg'])
 status_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=PADDING, pady=(0, PADDING))
-status_label = tk.Label(status_frame, text='Ready', bg=COLORS['bg'], fg=COLORS['text_dim'])
+
+# Main status label
+status_label = tk.Label(status_frame, text='✅ Ready to upload', bg=COLORS['bg'], fg=COLORS['text_dim'], font=('Segoe UI', 9, 'bold'))
 status_label.pack(anchor='w', padx=0, pady=(SPACING, 0))
+
+# Progress/details label
+progress_label = tk.Label(status_frame, text='', bg=COLORS['bg'], fg=COLORS['text_dim'], font=('Segoe UI', 8))
+progress_label.pack(anchor='w', padx=0, pady=(2, 0))
 
 # Populate sidebar list from saved IPs
 refresh_ip_tree()
