@@ -1,9 +1,12 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Update.h>
+#include <ArduinoJson.h>
 
 const char* ssid = "YOUR_WIFI";
 const char* password = "YOUR_PASSWORD";
+const char* FIRMWARE_VERSION = "1.0.0";
+const char* DEVICE_NAME = "ESP32_OTA";
 
 WebServer server(80);
 
@@ -42,6 +45,31 @@ void setup() {
       }
     }
   );
+
+  // Device info endpoint
+  server.on("/info", HTTP_GET, []() {
+    StaticJsonDocument<200> doc;
+    doc["name"] = DEVICE_NAME;
+    doc["version"] = FIRMWARE_VERSION;
+    doc["ip"] = WiFi.localIP().toString();
+    doc["mac"] = WiFi.macAddress();
+    doc["uptime"] = millis() / 1000;
+    doc["rssi"] = WiFi.RSSI();
+    
+    String json;
+    serializeJson(doc, json);
+    server.send(200, "application/json", json);
+  });
+
+  // Status/ping endpoint
+  server.on("/status", HTTP_GET, []() {
+    server.send(200, "text/plain", "OK");
+  });
+
+  // Receive configuration endpoint (for future use)
+  server.on("/config", HTTP_POST, []() {
+    server.send(200, "text/plain", "Config received");
+  });
 
   server.begin();
 }
